@@ -1,0 +1,60 @@
+# Full backend: SQL Server + RabbitMQ + 3 .NET services.
+#   cp .env.example .env && docker compose up --build
+x-service-env: &service-env
+  ASPNETCORE_ENVIRONMENT: Development
+  Jwt__Secret: ${JWT_SECRET:-change-me-to-a-long-random-secret-of-32-plus-chars}
+  RabbitMq__HostName: rabbitmq
+  ConnectionStrings__EmployeeDb: Server=sqlserver,1433;Database=EmployeeServiceDb;User Id=sa;Password=${SA_PASSWORD:-Your_strong_Passw0rd};TrustServerCertificate=True
+  ConnectionStrings__AbsenceDb: Server=sqlserver,1433;Database=AbsenceServiceDb;User Id=sa;Password=${SA_PASSWORD:-Your_strong_Passw0rd};TrustServerCertificate=True
+  ConnectionStrings__LogsDb: Server=sqlserver,1433;Database=LoggingServiceDb;User Id=sa;Password=${SA_PASSWORD:-Your_strong_Passw0rd};TrustServerCertificate=True
+  SeedAdmin__Email: ${SEED_ADMIN_EMAIL:-admin@company.com}
+  SeedAdmin__Password: ${SEED_ADMIN_PASSWORD:-Admin@12345}
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${SA_PASSWORD:-Your_strong_Passw0rd}
+    ports: ["1433:1433"]
+    volumes: [sqlserver-data:/var/opt/mssql]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      retries: 12
+      start_period: 20s
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports: ["5672:5672", "15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      retries: 12
+
+  employee-service:
+    build: { context: ., dockerfile: src/EmployeeService.Api/Dockerfile }
+    ports: ["3000:3000"]
+    environment: *service-env
+    volumes: [uploads:/app/wwwroot/uploads]
+    depends_on:
+      sqlserver: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  absence-service:
+    build: { context: ., dockerfile: src/AbsenceService.Api/Dockerfile }
+    ports: ["3001:3001"]
+    environment: *service-env
+    depends_on:
+      sqlserver: { condition: service_healthy }
+
+  logging-service:
+    build: { context: ., dockerfile: src/LoggingService.Worker/Dockerfile }
+    environment: *service-env
+    depends_on:
+      sqlserver: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+volumes:
+  sqlserver-data:
+  uploads:

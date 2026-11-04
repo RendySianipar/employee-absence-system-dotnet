@@ -1,0 +1,38 @@
+# Same pipeline for Azure DevOps: build, run unit/integration tests, publish results, build images.
+trigger:
+  branches:
+    include: [main]
+
+pr:
+  branches:
+    include: [main]
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  buildConfiguration: Release
+
+steps:
+  - task: UseDotNet@2
+    displayName: Use .NET 8 SDK
+    inputs:
+      packageType: sdk
+      version: 8.0.x
+
+  - script: dotnet restore EmployeeAbsence.sln
+    displayName: Restore
+
+  - script: dotnet build EmployeeAbsence.sln -c $(buildConfiguration) --no-restore -warnaserror
+    displayName: Build
+
+  - task: DotNetCoreCLI@2
+    displayName: Test
+    inputs:
+      command: test
+      projects: EmployeeAbsence.sln
+      arguments: -c $(buildConfiguration) --no-build --collect:"XPlat Code Coverage"
+      publishTestResults: true
+
+  - script: docker compose build
+    displayName: Build Docker images
